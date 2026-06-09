@@ -3,13 +3,25 @@ extends Resource
 class_name LLMConfig
 
 const SETTINGS_PATH: String = "user://llm_settings.cfg"
+const SECRETS_PATH: String = "res://llm_secrets.cfg"
 
 var endpoint: String = "https://ollama.com/v1/chat/completions"
-var api_key: String = "3a704623ac3042bab54f2c9ff8044abd.2qW05jazY9J00R2NwVTE3a_s"
+var api_key: String = ""
 var model: String = "gemma3:4b"
 var max_tokens: int = 512
 var temperature: float = 0.8
 var enabled: bool = true
+
+
+func _init() -> void:
+	_load_secrets()
+
+
+func _load_secrets() -> void:
+	var cfg := ConfigFile.new()
+	var err := cfg.load(SECRETS_PATH)
+	if err == OK:
+		api_key = cfg.get_value("llm", "api_key", "")
 
 
 func save() -> void:
