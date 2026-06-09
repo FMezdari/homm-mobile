@@ -3,6 +3,7 @@ extends Node2D
 # Constants pour la carte
 const TILE_SIZE: int = 64
 const COMBAT_SCENE := preload("res://scenes/combat_manager.tscn")
+const TACTICAL_COMBAT_SCENE := preload("res://scenes/tactical_combat.tscn")
 
 # Pixel art terrain tiles preloadés
 var _pixel_tiles: Dictionary = {}  # int -> Array[Image] (3 variants per type)
@@ -103,6 +104,20 @@ func _async_init() -> void:
 	_create_ui()
 	_create_town_overlay()
 	_register_game_data()
+
+	# Donner une armée de départ au héros via ArmyManager
+	if GameData.heroes.size() > 0:
+		var army_mgr: Node = load("res://scripts/army_manager.gd").new()
+		add_child(army_mgr)
+		army_mgr.give_starting_army(0)
+		_hero_army = GameData.heroes[0].army.stacks
+		army_mgr.queue_free()
+	else:
+		# Fallback: armée minimale
+		var fallback_army := GameData.Army.new()
+		fallback_army.add_stack("ashigaru", 10)
+		fallback_army.add_stack("samurai", 3)
+		_hero_army = fallback_army.stacks
 	_hero_mp = _hero_max_mp
 	_init_fog_of_war()
 	await get_tree().process_frame
@@ -122,6 +137,15 @@ func _async_init() -> void:
 	_combat_manager.combat_ended.connect(_on_combat_ended)
 	add_child(_combat_manager)
 	
+	# Initialiser le combat tactique (HoMM3-style)
+	_tactical_combat = TACTICAL_COMBAT_SCENE.instantiate()
+	_tactical_combat.combat_victory.connect(_on_combat_victory)
+	_tactical_combat.combat_defeat.connect(_on_combat_defeat)
+	_tactical_combat.combat_fled.connect(_on_combat_fled)
+	_tactical_combat.combat_ended.connect(_on_combat_ended)
+	add_child(_tactical_combat)
+	print("✓ Combat Tactique initialisé")
+
 	_llm_client = LLMClient.new()
 	add_child(_llm_client)
 	print("✓ Combat Manager initialisé")
@@ -2525,31 +2549,41 @@ func _update_fog_of_war() -> void:
 # SYSTÈME HOMURA : ARMÉES ENNEMIES
 # ============================================================
 func _init_enemy_armies() -> void:
-	"""Initialise les armées des ennemis errants uniquement (les boss ont leurs propres armées)"""
+	"""Initialise les armées des ennemis errants avec les nouveaux types d'unités"""
 	_enemy_armies = []
+	var new_unit_ids: Array = GameData.UNIT_TYPES.keys()
 
 	for i in range(_enemies.size()):
 		var army: Array = []
-		var army_size: int = rng.randi_range(1, 2)
+		var army_size: int = rng.randi_range(1, 3)
+		var used: Array[String] = []
 
 		for _j in range(army_size):
-			var unit_types: Array = ["pikeman", "archer"]
-			var unit_type: String = unit_types[rng.randi_range(0, unit_types.size() - 1)]
-			var unit_data: Dictionary = UNIT_TYPES[unit_type]
-			var count: int = rng.randi_range(2, 5)
-			
+			var unit_id: String
+			var safety: int = 0
+			while true:
+				unit_id = new_unit_ids[rng.randi_range(0, new_unit_ids.size() - 1)]
+				safety += 1
+				if not used.has(unit_id) or safety > 20:
+					break
+			var unit_data: Dictionary = GameData.UNIT_TYPES.get(unit_id, {})
+			if unit_data.is_empty():
+				unit_id = "ashigaru"
+				unit_data = GameData.UNIT_TYPES["ashigaru"]
+			used.append(unit_id)
+			var count: int = rng.randi_range(3, 8 + _game_week)
 			army.append({
-				"type": unit_type,
+				"type": unit_id,
 				"count": count,
-				"hp": unit_data["hp"],
-				"max_hp": unit_data["hp"],
-				"attack": unit_data["attack"],
-				"defense": unit_data["defense"]
+				"hp": unit_data.get("hp", 6),
+				"max_hp": unit_data.get("hp", 6),
+				"attack": unit_data.get("attack", 4),
+				"defense": unit_data.get("defense", 3)
 			})
 		
 		_enemy_armies.append(army)
 	
-	print("✓ ", _enemy_armies.size(), " armées errantes initialisées")
+	print("✓ ", _enemy_armies.size(), " armées errantes initialisées (nouveaux types)")
 
 # ============================================================
 # SYSTÈME HOMURA : FIN DE TOUR
@@ -2843,6 +2877,24 @@ func _army_to_combat_units(army: Array) -> Array:
 func _combat_units_to_army(combat_units: Array) -> Array:
 	return []
 
+func _enemy_army_to_army(enemy_index: int) -> GameData.Army:
+	var army := GameData.Army.new()
+	var old_army: Array = _enemy_armies[enemy_index] if enemy_index >= 0 and enemy_index < _enemy_armies.size() else []
+	if old_army.is_empty():
+		army.add_stack("goblin", 10)
+		army.add_stack("bandit", 5)
+		return army
+	var unit_map := {
+		"pikeman": "ashigaru", "archer": "archer", "griffin": "samurai",
+		"swordsman": "oni_brute", "cavalier": "cavalry", "angel": "oni_mage"
+	}
+	for stack in old_army:
+		var old_type: String = stack.get("type", "pikeman")
+		var new_type: String = unit_map.get(old_type, "ashigaru")
+		var count: int = stack.get("count", 5)
+		army.add_stack(new_type, count)
+	return army
+
 func _build_hero_combat_units() -> Array:
 	var hero_name: String = _get_active_hero_name()
 	# Combat 1v1 : un seul héros
@@ -2871,26 +2923,21 @@ func _start_combat(enemy_index: int) -> void:
 	_in_boss_fight = false
 	_current_enemy_index = enemy_index
 	_current_boss_index = -1
-	var enemy_army: Array = _enemy_armies[enemy_index] if enemy_index < _enemy_armies.size() else []
 	var map_enemy: Dictionary = _enemies[enemy_index] if enemy_index < _enemies.size() else {}
 	
-	print("⚔️ COMBAT ! vs ", map_enemy.get("name", "ennemi"))
+	print("⚔️ COMBAT TACTIQUE ! vs ", map_enemy.get("name", "ennemi"))
 	
-	if _combat_manager:
-		var hero_data: Dictionary = {
-			"units": _build_hero_combat_units(),
-			"name": _get_active_hero_name(),
-		}
-		var enemy_data: Dictionary = {
-			"units": _army_to_combat_units(enemy_army),
-			"name": map_enemy.get("name", "Armee ennemie"),
-			"gold": map_enemy.get("gold_reward", 75),
-			"xp": map_enemy.get("xp_reward", 50),
-		}
-		_combat_manager.start_combat(hero_data, enemy_data, enemy_index)
+	# Utiliser le combat tactique (HoMM3-style)
+	if _tactical_combat:
+		var hero_army: GameData.Army = GameData.heroes[0].army if GameData.heroes.size() > 0 else null
+		if hero_army == null or hero_army.stacks.is_empty():
+			hero_army = GameData.Army.new()
+			hero_army.add_stack("ashigaru", 5)
+		var enemy_army: GameData.Army = _enemy_army_to_army(enemy_index)
+		_tactical_combat.start_combat(hero_army, enemy_army)
 	else:
 		_in_combat = false
-		print("ERREUR: Combat Manager non initialisé !")
+		print("ERREUR: Combat Tactique non initialisé !")
 
 func _start_boss_fight(boss_index: int) -> void:
 	if _in_combat:
@@ -2967,18 +3014,15 @@ func _print_army_status(army_name: String, army: Array) -> void:
 			print("      ", unit["count"], " ", UNIT_TYPES[unit["type"]]["name"])
 
 func _on_combat_ended(won: bool) -> void:
-	if _combat_manager:
-		var combat_units: Array = _combat_manager.get_hero_units()
-		if combat_units.size() > 0:
-			var hero_unit: Dictionary = combat_units[0]
-			_hero_hp = hero_unit.get("hp", _hero_hp)
-			_hero_max_hp = hero_unit.get("max_hp", _hero_max_hp)
-			# Sauvegarder dans _heroes_data
-			if _active_hero_index >= 0 and _active_hero_index < _heroes_data.size():
-				_heroes_data[_active_hero_index]["hp"] = _hero_hp
-				_heroes_data[_active_hero_index]["max_hp"] = _hero_max_hp
-		if not won:
-			_hero_hp = 0
+	# Synchroniser l'armée du héros depuis GameData (modifiée par le combat tactique)
+	if GameData.heroes.size() > 0:
+		_hero_army = GameData.heroes[0].army.stacks
+		# Mettre à jour _heroes_data pour compatibilité
+		if _active_hero_index >= 0 and _active_hero_index < _heroes_data.size():
+			_heroes_data[_active_hero_index]["hp"] = _hero_hp
+			_heroes_data[_active_hero_index]["max_hp"] = _hero_max_hp
+	if not won:
+		_hero_hp = 0
 	_in_combat = false
 	_in_boss_fight = false
 	if won and _hero_hp <= 0:
@@ -3068,6 +3112,8 @@ func _check_boss_victory() -> void:
 func _on_combat_defeat() -> void:
 	print("💀 DÉFAITE !")
 	_hero_army = []
+	if GameData.heroes.size() > 0:
+		GameData.heroes[0].army.stacks.clear()
 	_hero_hp = 0
 	_in_boss_fight = false
 	_update_hero_panel()
@@ -3077,6 +3123,9 @@ func _on_combat_fled() -> void:
 	print("🏃 Fuite reussie !")
 	_in_combat = false
 	_in_boss_fight = false
+	# Synchroniser l'armée (peut avoir perdu des unités pendant le combat)
+	if GameData.heroes.size() > 0:
+		_hero_army = GameData.heroes[0].army.stacks
 
 
 # ---------------------------------------------------------------
@@ -3588,9 +3637,9 @@ func _check_city_visit() -> void:
 
 				if not _visited_cities.get(i, false):
 					print("🏛️ Visite de ", city_name, " !")
-					_add_units_to_army("pikeman", 5)
-					_add_units_to_army("archer", 3)
-					_create_floating_text("Renforts ! +5 Piquiers +3 Archers", Color(0.5, 0.9, 0.5), _hero.position)
+					_add_units_to_army("ashigaru", 8)
+					_add_units_to_army("archer", 4)
+					_create_floating_text("Renforts ! +8 Ashigaru +4 Archers", Color(0.5, 0.9, 0.5), _hero.position)
 					
 					# Révéler le brouillard autour de la ville
 					var city_tile: Vector2i = _cities_data[i].get("tile", Vector2i(
@@ -3613,6 +3662,18 @@ func _open_town_screen(city_index: int) -> void:
 		_town_title_label.text = city_name
 	_town_overlay.visible = true
 	_refresh_town_ui()
+
+	# Ouvrir aussi le CityManager moderne si le script est disponible
+	var cm_path := "res://scripts/city_manager.gd"
+	if ResourceLoader.exists(cm_path):
+		var city_mgr: Node = load(cm_path).new()
+		city_mgr.name = "CityManagerInstance"
+		city_mgr.open_city(city_index, _gold, _wood, _ore)
+		city_mgr.city_closed.connect(func():
+			_close_town_screen()
+		)
+		add_child(city_mgr)
+
 	if not _visited_cities.get(city_index, false):
 		_visited_cities[city_index] = true
 		_gain_xp(XP_VISIT_CITY)
@@ -3625,6 +3686,10 @@ func _close_town_screen() -> void:
 	_last_city_visit_index = -1
 	if _town_overlay:
 		_town_overlay.visible = false
+	# Nettoyer le CityManager moderne s'il existe
+	var cm_node = get_node_or_null("CityManagerInstance")
+	if cm_node:
+		cm_node.queue_free()
 
 func _on_town_recruit(unit_type: String, count: int) -> void:
 	if _selected_city_index >= 0:
@@ -4365,6 +4430,7 @@ var _hero_defense: int = 8
 var _in_combat: bool = false
 var _pause_active: bool = false
 var _combat_manager: CanvasLayer = null
+var _tactical_combat: CanvasLayer = null
 var _current_enemy_index: int = -1
 var _current_boss_index: int = -1
 var _in_boss_fight: bool = false
@@ -5765,11 +5831,16 @@ func _city_garrison_count(city_index: int) -> int:
 
 func _add_units_to_army(unit_type: String, count: int) -> void:
 	var unit_data: Dictionary = UNIT_TYPES.get(unit_type, {})
+	if unit_data.is_empty() and GameData.UNIT_TYPES.has(unit_type):
+		unit_data = GameData.UNIT_TYPES[unit_type]
 	if unit_data.is_empty():
 		return
 	for unit in _hero_army:
 		if unit["type"] == unit_type:
 			unit["count"] += count
+			# Sync avec GameData
+			if GameData.heroes.size() > 0:
+				GameData.heroes[0].army.add_stack(unit_type, count)
 			return
 	_hero_army.append({
 		"type": unit_type,
@@ -5778,6 +5849,9 @@ func _add_units_to_army(unit_type: String, count: int) -> void:
 		"attack": unit_data.get("attack", 4),
 		"defense": unit_data.get("defense", 4),
 	})
+	# Sync avec GameData
+	if GameData.heroes.size() > 0:
+		GameData.heroes[0].army.add_stack(unit_type, count)
 
 func _creature_on_tile(tile: Vector2i) -> GameData.Creature:
 	if GameData.creatures_on_tile.has(tile):
@@ -5898,6 +5972,12 @@ func _load_game() -> void:
 	
 	_hero_mp = data.get("hero_mp", _hero_max_mp)
 	_hero_army = data.get("hero_army", [])
+	# Restaurer l'armée dans GameData pour le combat tactique
+	if GameData.heroes.size() > 0:
+		var restored_army := GameData.Army.new()
+		for s in _hero_army:
+			restored_army.add_stack(s.get("type", "ashigaru"), s.get("count", 1))
+		GameData.heroes[0].army = restored_army
 	_visited_cities = data.get("visited_cities", {})
 	_quest_progress = data.get("quest_progress", {})
 	_quest_completed = data.get("quest_completed", [])
@@ -6020,6 +6100,14 @@ func _register_game_data() -> void:
 		hero_data.position = Vector2i(_zone_w / 2, _zone_h / 2)
 	hero_data.owner = 0
 	hero_data.creatures = []
+	# Synchroniser l'armée dans GameData
+	if _hero_army.size() > 0:
+		var sync_army := GameData.Army.new()
+		for s in _hero_army:
+			var stype: String = s.get("type", "ashigaru")
+			var scount: int = s.get("count", 1)
+			sync_army.add_stack(stype, scount)
+		hero_data.army = sync_army
 	GameData.heroes.append(hero_data)
 
 	# Enregistrer les villes

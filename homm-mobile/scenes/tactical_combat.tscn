@@ -1,0 +1,8 @@
+[gd_scene format=3 uid="uid://tacticalcombat01"]
+
+[ext_resource type="Script" path="res://scripts/tactical_combat.gd" id="1_tactical"]
+
+[node name="TacticalCombat" type="CanvasLayer"]
+layer = 10
+script = ExtResource("1_tactical")
+visible = false

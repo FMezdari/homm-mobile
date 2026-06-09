@@ -44,13 +44,19 @@ func _generate_sprite(type: String, size: int, variant_seed: int = -1) -> ImageT
 		"enemy_goblin":
 			_generate_enemy_sprite(img, size, rng, "goblin")
 		"enemy_archer":
-			_generate_enemy_sprite(img, size, rng, "archer")
+			_generate_archer_sprite_v2(img, size, rng)
 		"enemy_swordsman":
 			_generate_enemy_sprite(img, size, rng, "swordsman")
 		"enemy_tengu":
 			_generate_enemy_sprite(img, size, rng, "tengu")
 		"enemy_kappa":
 			_generate_enemy_sprite(img, size, rng, "kappa")
+		"enemy_samurai":
+			_generate_samurai_sprite(img, size, rng)
+		"enemy_knight":
+			_generate_samurai_sprite(img, size, rng)
+		"enemy_ashigaru":
+			_generate_ashigaru_sprite(img, size, rng)
 		"enemy_ninja":
 			_generate_enemy_sprite(img, size, rng, "ninja")
 		"enemy_monk":
@@ -78,8 +84,11 @@ func _generate_sprite(type: String, size: int, variant_seed: int = -1) -> ImageT
 					if (x - size/2)**2 + (y - size/2)**2 < (size/3)**2:
 						img.set_pixel(x, y, Color(0.5, 0.5, 0.5))
 	
-	# Ajouter un contour noir autour du sprite
-	_add_outline(img)
+	# Ajouter un contour noir autour du sprite (2px pour les unités)
+	var outline_thick := 1
+	if type.begins_with("enemy_") or type == "hero":
+		outline_thick = 2
+	_add_outline(img, Color(0, 0, 0, 0.85), outline_thick)
 
 	# Effet de lueur douce pour les éléments importants
 	if type in ["mine_gold", "mine_ore", "chest", "tower"]:
@@ -117,6 +126,12 @@ func _draw_rect(img: Image, x: int, y: int, w: int, h: int, color: Color) -> voi
 func _draw_pixel(img: Image, x: int, y: int, color: Color) -> void:
 	if x >= 0 and x < img.get_width() and y >= 0 and y < img.get_height():
 		img.set_pixel(x, y, color)
+
+func _draw_ellipse(img: Image, cx: int, cy: int, rx: int, ry: int, color: Color) -> void:
+	for x in range(-rx, rx + 1):
+		for y in range(-ry, ry + 1):
+			if (x*x * ry*ry + y*y * rx*rx) <= rx*rx * ry*ry:
+				_draw_pixel(img, cx + x, cy + y, color)
 
 func _draw_circle(img: Image, cx: int, cy: int, r: int, color: Color) -> void:
 	for x in range(-r, r + 1):
@@ -901,6 +916,133 @@ func _generate_chest_sprite(img: Image, size: int, rng: RandomNumberGenerator) -
 	# Éclats de lumière sur le couvercle (reflet)
 	_draw_rect(img, hs - 8, hs - 18, 4, 2, Color(1.0, 0.95, 0.80))
 	_draw_rect(img, hs + 4, hs - 16, 3, 2, Color(1.0, 0.95, 0.80))
+
+# --- SAMOURAÏ 64x64 — écusson / mon style kabuto ---
+func _generate_samurai_sprite(img: Image, size: int, rng: RandomNumberGenerator) -> void:
+	var s: int = size
+	var hs: int = s / 2
+
+	# Ombre au sol
+	_draw_ellipse(img, hs, s - 3, 14, 4, Color(0, 0, 0, 0.30))
+
+	# Cercle de fond (écusson noir)
+	_draw_circle(img, hs, hs, 22, Color(0.08, 0.05, 0.04))
+	_draw_circle(img, hs, hs, 18, Color(0.12, 0.08, 0.06))
+
+	# === KABUTO (casque) — forme épaisse et lisible ===
+	# Dôme du casque
+	_draw_rect(img, hs - 14, hs - 18, 28, 16, Color(0.08, 0.05, 0.04))
+	_draw_rect(img, hs - 12, hs - 16, 24, 12, Color(0.25, 0.15, 0.12))
+	# Rebord du casque (mabizashi)
+	_draw_rect(img, hs - 16, hs - 4, 32, 4, Color(0.08, 0.05, 0.04))
+	_draw_rect(img, hs - 16, hs - 4, 32, 2, Color(0.85, 0.18, 0.16))
+	# Shikoro (protège-nuque) — 3 lames
+	for i in range(3):
+		var sy = hs + 2 + i * 3
+		_draw_rect(img, hs - 14 + i * 2, sy, 28 - i * 4, 3, Color(0.08, 0.05, 0.04))
+		_draw_rect(img, hs - 14 + i * 2, sy, 28 - i * 4, 1, Color(0.85, 0.18, 0.16))
+
+	# Maedate (crête avant) — ornement doré en V
+	_draw_rect(img, hs - 1, hs - 30, 2, 14, Color(0.95, 0.82, 0.18))
+	_draw_rect(img, hs - 6, hs - 32, 12, 3, Color(0.95, 0.82, 0.18))
+	_draw_rect(img, hs - 4, hs - 34, 8, 2, Color(0.85, 0.70, 0.10))
+
+	# Mon (blason central) — petit cercle rouge
+	_draw_circle(img, hs, hs + 4, 4, Color(0.85, 0.18, 0.16))
+	_draw_circle(img, hs, hs + 4, 2, Color(0.95, 0.82, 0.18))
+
+	# === KATANA (lame diagonale traversant l'écusson) ===
+	# Lame
+	_draw_line(img, hs - 8, hs + 18, hs + 16, hs - 18, Color(0.82, 0.80, 0.75), 4)
+	# Brillance
+	_draw_line(img, hs - 7, hs + 18, hs + 17, hs - 18, Color(0.95, 0.93, 0.90), 1)
+	# Tsuba (garde)
+	_draw_circle(img, hs + 4, hs + 6, 5, Color(0.85, 0.18, 0.16))
+	_draw_circle(img, hs + 4, hs + 6, 3, Color(0.95, 0.82, 0.18))
+
+
+# --- ASHIGARU 64x64 — écusson / mon style yari ---
+func _generate_ashigaru_sprite(img: Image, size: int, rng: RandomNumberGenerator) -> void:
+	var s: int = size
+	var hs: int = s / 2
+
+	# Ombre au sol
+	_draw_ellipse(img, hs, s - 3, 14, 4, Color(0, 0, 0, 0.30))
+
+	# Fond losange (écusson brun)
+	_draw_triangle(img, hs, hs - 24, hs - 22, hs, hs, hs + 24, Color(0.32, 0.22, 0.14))
+	_draw_triangle(img, hs, hs - 24, hs + 22, hs, hs, hs + 24, Color(0.32, 0.22, 0.14))
+	_draw_triangle(img, hs, hs - 20, hs - 18, hs, hs, hs + 20, Color(0.40, 0.28, 0.18))
+	_draw_triangle(img, hs, hs - 20, hs + 18, hs, hs, hs + 20, Color(0.40, 0.28, 0.18))
+
+	# === JINGASA (chapeau conique) en haut du losange ===
+	_draw_rect(img, hs - 12, hs - 26, 24, 8, Color(0.50, 0.35, 0.22))
+	_draw_rect(img, hs - 8, hs - 30, 16, 6, Color(0.45, 0.32, 0.20))
+	_draw_rect(img, hs - 4, hs - 32, 8, 4, Color(0.42, 0.30, 0.18))
+	# Bord large
+	_draw_rect(img, hs - 16, hs - 18, 32, 3, Color(0.52, 0.38, 0.24))
+
+	# === DEUX YARI (lances croisées en X) ===
+	# Lance 1 (gauche → droite)
+	_draw_line(img, hs - 18, hs + 14, hs + 18, hs - 14, Color(0.75, 0.73, 0.68), 3)
+	# Pointe lance 1
+	_draw_triangle(img, hs + 20, hs - 18, hs + 14, hs - 12, hs + 24, hs - 14, Color(0.85, 0.82, 0.78))
+	# Lance 2 (droite → gauche)
+	_draw_line(img, hs + 18, hs + 14, hs - 18, hs - 14, Color(0.75, 0.73, 0.68), 3)
+	# Pointe lance 2
+	_draw_triangle(img, hs - 20, hs - 18, hs - 14, hs - 12, hs - 24, hs - 14, Color(0.85, 0.82, 0.78))
+	
+	# Petits fanions rouges aux lances
+	_draw_rect(img, hs + 8, hs - 6, 6, 4, Color(0.85, 0.25, 0.25))
+	_draw_rect(img, hs - 14, hs - 6, 6, 4, Color(0.85, 0.25, 0.25))
+
+	# Petit bouclier rond au centre
+	_draw_circle(img, hs, hs + 2, 6, Color(0.40, 0.28, 0.16))
+	_draw_circle(img, hs, hs + 2, 4, Color(0.48, 0.34, 0.22))
+	_draw_circle(img, hs, hs + 2, 2, Color(0.85, 0.25, 0.25))
+
+
+# --- ARCHER 64x64 — écusson / mon style yumi ---
+func _generate_archer_sprite_v2(img: Image, size: int, rng: RandomNumberGenerator) -> void:
+	var s: int = size
+	var hs: int = s / 2
+
+	# Ombre au sol
+	_draw_ellipse(img, hs, s - 3, 14, 4, Color(0, 0, 0, 0.30))
+
+	# Fond ovale vertical (écusson vert)
+	_draw_ellipse(img, hs, hs, 20, 24, Color(0.18, 0.32, 0.14))
+	_draw_ellipse(img, hs, hs, 16, 20, Color(0.22, 0.38, 0.16))
+	# Bordure rouge fine
+	_draw_ellipse(img, hs, hs, 18, 22, Color(0.85, 0.25, 0.25, 0.5))
+
+	# === YUMI (grand arc) — courbe élégante à gauche ===
+	for by in range(0, 36):
+		var bx = hs - 10 + int(sin((by - 18) / 18.0 * PI * 0.5) * 3)
+		var by_pos = hs - 20 + by
+		_draw_rect(img, bx, by_pos, 3, 3, Color(0.55, 0.38, 0.20))
+		_draw_rect(img, bx + 1, by_pos, 1, 3, Color(0.35, 0.22, 0.12))
+	# Corde d'arc (blanche)
+	for cy in range(0, 34):
+		var cx = hs - 7 + int(sin((cy - 17) / 17.0 * PI * 0.5) * 2)
+		_draw_rect(img, cx, hs - 18 + cy, 1, 2, Color(0.92, 0.90, 0.88))
+
+	# === FLÈCHE diagonale ===
+	_draw_line(img, hs - 4, hs + 16, hs + 14, hs - 16, Color(0.65, 0.50, 0.25), 2)
+	# Pointe de flèche
+	_draw_triangle(img, hs + 16, hs - 20, hs + 12, hs - 14, hs + 18, hs - 16, Color(0.75, 0.75, 0.80))
+	# Empennes
+	_draw_rect(img, hs - 4, hs + 14, 3, 4, Color(0.85, 0.25, 0.25))
+	_draw_rect(img, hs - 4, hs + 12, 5, 2, Color(0.75, 0.20, 0.18))
+
+	# CARQUOIS (visible à droite)
+	_draw_rect(img, hs + 16, hs - 6, 4, 18, Color(0.35, 0.28, 0.18))
+	_draw_rect(img, hs + 17, hs - 6, 2, 18, Color(0.42, 0.34, 0.22))
+	# Plumes dépassant
+	for fy in [0, 1, 2]:
+		_draw_rect(img, hs + 14 + fy * 2, hs - 8, 5, 3, Color(0.85, 0.25, 0.25))
+		_draw_rect(img, hs + 15 + fy * 2, hs - 10, 3, 2, Color(0.75, 0.20, 0.18))
+
 
 # --- ENNEMI JAPONAIS 64x64 ---
 func _generate_enemy_sprite(img: Image, size: int, rng: RandomNumberGenerator, enemy_type: String) -> void:

@@ -44,8 +44,8 @@ var _hero_card: Panel
 var _enemy_card: Panel
 var _hero_sprite_node: Sprite2D
 var _enemy_sprite_node: Sprite2D
-var _hero_hp_fill: ColorRect
-var _enemy_hp_fill: ColorRect
+var _hero_hp_fill: ColorRect = null
+var _enemy_hp_fill: ColorRect = null
 var _hero_info_label: Label
 var _enemy_info_label: Label
 var _combat_log: RichTextLabel
@@ -555,9 +555,10 @@ func _setup_ui() -> void:
 	spell_title.set_anchors_preset(Control.PRESET_TOP_WIDE)
 	spell_title.position = Vector2(0, 15)
 	spell_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	spell_title.text = "Choisir un sort"
+	spell_title.text = "— Choisir un sort —"
 	spell_title.add_theme_font_size_override("font_size", 22)
 	spell_title.add_theme_color_override("font_color", Color(0.75, 0.45, 0.95))
+	spell_title.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.60))
 	_spell_panel.add_child(spell_title)
 
 	var spell_container = HBoxContainer.new()
@@ -1076,6 +1077,22 @@ func _spawn_result_panel(outcome: String) -> void:
 			title.add_theme_color_override("font_color", COLOR_TEAL)
 			desc.text = "[center]Vous avez réussi à\nfuir le combat.[/center]"
 
+	# Particules de célébration
+	if outcome == "victory":
+		for i in range(15):
+			var confetti = ColorRect.new()
+			confetti.size = Vector2(randf_range(4, 8), randf_range(4, 8))
+			confetti.color = Color(randf_range(0.8, 1.0), randf_range(0.4, 0.9), randf_range(0.1, 0.5), 0.7)
+			confetti.position = Vector2(randf_range(0, 540), -20 - randf_range(0, 40))
+			confetti.z_index = 50
+			confetti.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			add_child(confetti)
+			var ctw = create_tween().set_ease(Tween.EASE_IN).set_trans(Tween.TRANS_QUAD)
+			ctw.tween_property(confetti, "position:y", 1200 + 20, randf_range(2.5, 4.5))
+			ctw.parallel().tween_property(confetti, "position:x", confetti.position.x + randf_range(-30, 30), randf_range(2.5, 4.5))
+			ctw.parallel().tween_property(confetti, "rotation", randf_range(-3, 3), randf_range(2.5, 4.5))
+			ctw.tween_callback(func(): if is_instance_valid(confetti): confetti.queue_free())
+
 	# Entrance animation
 	var anim = create_tween().set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_BACK)
 	anim.tween_property(dim, "modulate:a", 1.0, 0.3)
@@ -1132,6 +1149,12 @@ func _on_defend_pressed() -> void:
 	_log_message("[color=#5a9eb8]Vous prenez une position defensive. (+50% defense)[/color]")
 	if SFX and SFX.has_method("play_click"):
 		SFX.play_click()
+
+	# Effet de bouclier bleuté sur le sprite
+	if _hero_sprite_node and is_instance_valid(_hero_sprite_node):
+		var shield = create_tween().set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_CUBIC)
+		shield.tween_property(_hero_sprite_node, "modulate", Color(0.6, 0.8, 1.2), 0.2)
+
 	_process_next_turn()
 
 func _on_magic_pressed() -> void:
@@ -1168,7 +1191,104 @@ func _update_mana_display() -> void:
 	if _mana_label:
 		_mana_label.text = "Mana: %d/%d" % [_hero_mana, _hero_max_mana]
 
+func _spell_cast_announce(spell_name: String, color: Color) -> void:
+	# Texte du nom du sort qui apparaît brièvement
+	var announce = Label.new()
+	announce.text = spell_name
+	announce.add_theme_font_size_override("font_size", 20)
+	announce.add_theme_color_override("font_color", color)
+	announce.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.80))
+	announce.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.50))
+	announce.add_theme_constant_override("outline_size", 2)
+	announce.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	announce.set_anchors_preset(Control.PRESET_CENTER)
+	announce.offset_top = -60
+	announce.custom_minimum_size = Vector2(200, 30)
+	announce.z_index = 45
+	announce.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_combat_panel.add_child(announce)
+	var tw = create_tween().set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_CUBIC)
+	tw.tween_property(announce, "offset_top", -80, 0.15)
+	tw.tween_interval(0.3)
+	tw.tween_property(announce, "modulate:a", 0.0, 0.2)
+	tw.tween_callback(func(): if is_instance_valid(announce): announce.queue_free())
+
+func _spell_cast_effect(spell_type: String) -> void:
+	# Cercle d'incantation runique
+	var rune_colors := {
+		"fireball": Color(1.0, 0.4, 0.1),
+		"lightning": Color(0.6, 0.8, 1.0),
+		"heal": Color(0.3, 0.9, 0.4),
+		"rage": Color(1.0, 0.6, 0.1),
+		"ice_shard": Color(0.5, 0.7, 1.0),
+	}
+	var color: Color = rune_colors.get(spell_type, Color(0.6, 0.4, 1.0))
+
+	var cx: float = get_viewport().size.x * 0.5
+	var cy: float = get_viewport().size.y * 0.5
+
+	# Anneau runique externe
+	for ring_i in 3:
+		var ring := ColorRect.new()
+		ring.size = Vector2(100 + ring_i * 20, 100 + ring_i * 20)
+		ring.position = Vector2(cx - ring.size.x / 2, cy - ring.size.y / 2)
+		ring.color = Color(color.r, color.g, color.b, 0.0)
+		ring.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		ring.z_index = 40
+		ring.set_anchors_preset(Control.PRESET_CENTER)
+		_combat_panel.add_child(ring)
+		var rtw = create_tween().set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_QUAD)
+		rtw.tween_property(ring, "modulate", Color(color.r, color.g, color.b, 0.25 - ring_i * 0.05), 0.2)
+		rtw.parallel().tween_property(ring, "size", Vector2(160 + ring_i * 30, 160 + ring_i * 30), 0.3)
+		rtw.parallel().tween_property(ring, "position", Vector2(
+			cx - (160 + ring_i * 30) / 2,
+			cy - (160 + ring_i * 30) / 2
+		), 0.3)
+		rtw.tween_property(ring, "modulate:a", 0.0, 0.2)
+		rtw.tween_callback(func():
+			if is_instance_valid(ring): ring.queue_free()
+		)
+
+	# Particules runiques tournoyantes
+	for i in 8:
+		var rune := ColorRect.new()
+		rune.size = Vector2(6, 6)
+		rune.color = color
+		rune.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		rune.z_index = 41
+		var angle := (float(i) / 8.0) * TAU
+		var radius := 60.0
+		rune.position = Vector2(cx + cos(angle) * radius, cy + sin(angle) * radius)
+		_combat_panel.add_child(rune)
+		var r2 = radius + 20.0
+		var rtw2 = create_tween().set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_QUAD)
+		rtw2.tween_property(rune, "position", Vector2(
+			cx + cos(angle + PI / 4) * r2,
+			cy + sin(angle + PI / 4) * r2
+		), 0.25)
+		rtw2.parallel().tween_property(rune, "modulate:a", 0.0, 0.3)
+		rtw2.tween_callback(func():
+			if is_instance_valid(rune): rune.queue_free()
+		)
+
+	# Rayon lumineux ascendant
+	var beam := ColorRect.new()
+	beam.size = Vector2(4, 0)
+	beam.color = Color(color.r, color.g, color.b, 0.30)
+	beam.position = Vector2(cx - 2, cy)
+	beam.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	beam.z_index = 39
+	_combat_panel.add_child(beam)
+	var btw = create_tween().set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_QUAD)
+	btw.tween_property(beam, "size:y", 200, 0.25)
+	btw.parallel().tween_property(beam, "position:y", cy - 100, 0.25)
+	btw.parallel().tween_property(beam, "modulate:a", 0.0, 0.35)
+	btw.tween_callback(func():
+		if is_instance_valid(beam): beam.queue_free()
+	)
+
 func _cast_spell(spell_type: String) -> void:
+	_spell_cast_effect(spell_type)
 	match spell_type:
 		"fireball":
 			_cast_fireball()
@@ -1186,6 +1306,7 @@ func _cast_fireball() -> void:
 		_end_combat(true)
 		return
 
+	_spell_cast_announce("Boule de Feu", Color(1.0, 0.4, 0.1))
 	var base_damage = _hero_unit.get("magic", 15)
 	_log_message("[color=#ff5522]Vous lancez Boule de Feu![/color]")
 	if SFX and SFX.has_method("play_fireball"):
@@ -1199,7 +1320,7 @@ func _cast_fireball() -> void:
 	_show_damage_number(_enemy_card, damage, true)
 	_log_message("[color=#ff5522]Boule de Feu inflige [color=#ff4444]" + str(damage) + "[/color] degats![/color]")
 	_shake_panel(8.0, 0.4, Vector2.RIGHT)
-	_update_unit_displays()
+	_update_hp_bars_smooth()
 
 	if _enemy_unit.get("hp", 0) <= 0:
 		_end_combat(true)
@@ -1212,6 +1333,7 @@ func _cast_lightning() -> void:
 		_end_combat(true)
 		return
 
+	_spell_cast_announce("Éclair", Color(0.6, 0.8, 1.0))
 	var base_damage = _hero_unit.get("magic", 20)
 	var magic_res = _enemy_unit.get("magic_res", 2)
 	var damage = max(1, int((base_damage - magic_res) * randf_range(1.2, 1.5)))
@@ -1223,7 +1345,7 @@ func _cast_lightning() -> void:
 	_flash_screen(Color(0.6, 0.8, 1.0), 0.15)
 	_shake_panel(6.0, 0.25)
 	_show_damage_number(_enemy_card, damage, true)
-	_update_unit_displays()
+	_update_hp_bars_smooth()
 
 	if _enemy_unit.get("hp", 0) <= 0:
 		_end_combat(true)
@@ -1232,6 +1354,7 @@ func _cast_lightning() -> void:
 	_process_next_turn()
 
 func _cast_heal() -> void:
+	_spell_cast_announce("Soin", Color(0.3, 0.9, 0.4))
 	var heal_power = _hero_unit.get("magic", 12)
 	var max_hp = _hero_unit.get("max_hp", _hero_unit.get("hp", 1))
 	var current_hp = _hero_unit.get("hp", 0)
@@ -1243,14 +1366,23 @@ func _cast_heal() -> void:
 		SFX.play_heal()
 	_flash_screen(Color(0.3, 0.9, 0.4), 0.2)
 	_show_heal_number(_hero_card, heal_amount)
-	_update_unit_displays()
+	_update_hp_bars_smooth()
 	_process_next_turn()
 
 func _cast_rage() -> void:
+	_spell_cast_announce("Fureur", Color(1.0, 0.5, 0.1))
 	_hero_attack_buff = true
 	_rage_indicator.visible = true
 	_log_message("[color=#ff8822]Vous lancez Fureur! (+50% attaque)[/color]")
 	_flash_screen(Color(1.0, 0.5, 0.1), 0.2)
+
+	# Effet de lueur rage sur le sprite du héros
+	if _hero_sprite_node and is_instance_valid(_hero_sprite_node):
+		var glow = create_tween().set_loops().set_ease(Tween.EASE_IN_OUT).set_trans(Tween.TRANS_SINE)
+		glow.tween_property(_hero_sprite_node, "modulate", Color(1.3, 0.8, 0.3), 0.5)
+		glow.tween_property(_hero_sprite_node, "modulate", Color(1.0, 0.6, 0.2), 0.5)
+		_hero_sprite_node.set_meta("rage_tween", glow)
+
 	_update_unit_displays()
 	_process_next_turn()
 
@@ -1259,6 +1391,7 @@ func _cast_ice_shard() -> void:
 		_end_combat(true)
 		return
 
+	_spell_cast_announce("Éclat de Glace", Color(0.5, 0.7, 1.0))
 	var base_damage = _hero_unit.get("magic", 18)
 	var magic_res = _enemy_unit.get("magic_res", 2)
 	var damage = max(1, int((base_damage - magic_res) * randf_range(1.5, 1.8)))
@@ -1270,7 +1403,7 @@ func _cast_ice_shard() -> void:
 	_flash_screen(Color(0.5, 0.7, 1.0), 0.15)
 	_shake_panel(8.0, 0.3, Vector2.RIGHT)
 	_show_damage_number(_enemy_card, damage, true)
-	_update_unit_displays()
+	_update_hp_bars_smooth()
 
 	if _enemy_unit.get("hp", 0) <= 0:
 		_end_combat(true)
@@ -1314,7 +1447,7 @@ func _process_hero_attack() -> void:
 	_show_damage_number(_enemy_card, damage, false)
 
 	if not _hero_card or not _enemy_card:
-		_update_unit_displays()
+		_update_hp_bars_smooth()
 		if target["hp"] <= 0:
 			_end_combat(true)
 		else:
@@ -1341,7 +1474,7 @@ func _process_hero_attack() -> void:
 		_animate_card_death(_enemy_card)
 		_vfx.death_effect(end_pos)
 
-	_update_unit_displays()
+	_update_hp_bars_smooth()
 
 	if target["hp"] <= 0:
 		_end_combat(true)
@@ -1400,7 +1533,7 @@ func _process_enemy_turn() -> void:
 		if _hero_card:
 			_vfx.death_effect(_hero_card.global_position + _hero_card.size / 2)
 
-	_update_unit_displays()
+	_update_hp_bars_smooth()
 
 	if target["hp"] <= 0:
 		_end_combat(false)
@@ -1444,11 +1577,45 @@ func _process_next_turn() -> void:
 		_rage_indicator.visible = false
 		_hero_mana = mini(_hero_max_mana, _hero_mana + 5)
 		_update_mana_display()
+
+		# Réinitialiser les effets visuels des buffs
+		if _hero_sprite_node and is_instance_valid(_hero_sprite_node):
+			_hero_sprite_node.modulate = Color.WHITE
+			if _hero_sprite_node.has_meta("rage_tween"):
+				var rt: Tween = _hero_sprite_node.get_meta("rage_tween")
+				if rt and rt.is_valid(): rt.kill()
+				_hero_sprite_node.remove_meta("rage_tween")
+		if _enemy_sprite_node and is_instance_valid(_enemy_sprite_node):
+			_enemy_sprite_node.modulate = Color.WHITE
+
+		# Bordure de carte héros brille en bleu
+		if _hero_card and is_instance_valid(_hero_card):
+			var style = _hero_card.get_theme_stylebox("panel") as StyleBoxFlat
+			if style:
+				style.border_color = Color(0.35, 0.70, 1.0, 0.90)
+			create_tween().tween_callback(func():
+				if _hero_card and is_instance_valid(_hero_card):
+					var s = _hero_card.get_theme_stylebox("panel") as StyleBoxFlat
+					if s: s.border_color = Color(0.35, 0.60, 0.85)
+			).set_delay(0.5)
+
 		_show_turn_banner("Votre Tour", COLOR_TEAL)
 	else:
 		_turn_label.text = "Tour ennemi"
 		_turn_label.add_theme_color_override("font_color", COLOR_CRIMSON)
 		_action_bar.visible = false
+
+		# Bordure de carte ennemi brille en rouge
+		if _enemy_card and is_instance_valid(_enemy_card):
+			var style = _enemy_card.get_theme_stylebox("panel") as StyleBoxFlat
+			if style:
+				style.border_color = Color(1.0, 0.25, 0.25, 0.90)
+			create_tween().tween_callback(func():
+				if _enemy_card and is_instance_valid(_enemy_card):
+					var s = _enemy_card.get_theme_stylebox("panel") as StyleBoxFlat
+					if s: s.border_color = Color(0.85, 0.25, 0.25)
+			).set_delay(0.5)
+
 		_show_turn_banner("Tour Ennemi", COLOR_CRIMSON)
 		await get_tree().create_timer(0.8).timeout
 		_process_enemy_turn()
@@ -1456,6 +1623,40 @@ func _process_next_turn() -> void:
 # ============================================
 # UI UPDATES — 1v1 cards
 # ============================================
+
+func _update_hp_bars_smooth() -> void:
+	# Met à jour les barres de vie avec une transition fluide (sans recréer les cartes)
+	var hero_hp = _hero_unit.get("hp", 0)
+	var hero_max = _hero_unit.get("max_hp", 1)
+	var enemy_hp = _enemy_unit.get("hp", 0)
+	var enemy_max = _enemy_unit.get("max_hp", 1)
+
+	if _hero_hp_fill and is_instance_valid(_hero_hp_fill):
+		var hp_ratio = float(hero_hp) / max(1, hero_max)
+		var tw = create_tween().set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_CUBIC)
+		tw.tween_property(_hero_hp_fill, "size:x", max(1, 142 * hp_ratio), 0.25)
+		var col = COLOR_GREEN if hp_ratio > 0.5 else (Color(0.95, 0.75, 0.10) if hp_ratio > 0.25 else COLOR_RED)
+		tw.parallel().tween_property(_hero_hp_fill, "color", col, 0.25)
+	if _enemy_hp_fill and is_instance_valid(_enemy_hp_fill):
+		var hp_ratio = float(enemy_hp) / max(1, enemy_max)
+		var tw = create_tween().set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_CUBIC)
+		tw.tween_property(_enemy_hp_fill, "size:x", max(1, 142 * hp_ratio), 0.25)
+		var col = COLOR_GREEN if hp_ratio > 0.5 else (Color(0.95, 0.75, 0.10) if hp_ratio > 0.25 else COLOR_RED)
+		tw.parallel().tween_property(_enemy_hp_fill, "color", col, 0.25)
+
+	# Mettre à jour les labels texte
+	for c in _hero_card.get_children():
+		if c is Label and c.position.y == 26:
+			c.text = str(hero_hp) + "/" + str(hero_max)
+		if c is Label and c.position.y == 60:
+			var pct = int(float(hero_hp) / max(1, hero_max) * 100)
+			c.text = "HP: " + str(pct) + "%"
+	for c in _enemy_card.get_children():
+		if c is Label and c.position.y == 26:
+			c.text = str(enemy_hp) + "/" + str(enemy_max)
+		if c is Label and c.position.y == 60:
+			var pct = int(float(enemy_hp) / max(1, enemy_max) * 100)
+			c.text = "HP: " + str(pct) + "%"
 
 func _update_unit_displays() -> void:
 	if _hero_card:
@@ -1468,6 +1669,8 @@ func _update_unit_displays() -> void:
 		_enemy_sprites_container.queue_free()
 	_hero_sprite_node = null
 	_enemy_sprite_node = null
+	_hero_hp_fill = null
+	_enemy_hp_fill = null
 
 	var vw: float = 	get_viewport().size.x
 	var cx: float = vw * 0.5
@@ -1608,6 +1811,10 @@ func _create_unit_card(unit: Dictionary, is_hero: bool) -> Panel:
 	hp_fill.size = Vector2(max(1, 142 * hp_ratio), 10)
 	hp_fill.color = COLOR_GREEN if hp_ratio > 0.5 else (Color(0.95, 0.75, 0.10) if hp_ratio > 0.25 else COLOR_RED)
 	card.add_child(hp_fill)
+	if is_hero:
+		_hero_hp_fill = hp_fill
+	else:
+		_enemy_hp_fill = hp_fill
 
 	var hp_text = Label.new()
 	hp_text.position = Vector2(8, 26)
@@ -1667,16 +1874,53 @@ func _create_unit_card(unit: Dictionary, is_hero: bool) -> Panel:
 # ============================================
 
 func _show_turn_banner(text: String, color: Color) -> void:
+	var vp = get_viewport().get_visible_rect().size
+
+	# Barre décorative
+	var bar = ColorRect.new()
+	bar.size = Vector2(vp.x, 40)
+	bar.color = Color(0.04, 0.03, 0.05, 0.85)
+	bar.position = Vector2(0, -40)
+	bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	bar.z_index = 25
+	_combat_panel.add_child(bar)
+	var bar_tw = create_tween().set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_CUBIC)
+	bar_tw.tween_property(bar, "position:y", 200, 0.25)
+	bar_tw.tween_interval(0.5)
+	bar_tw.tween_property(bar, "position:y", -40, 0.2)
+	bar_tw.tween_callback(func():
+		if is_instance_valid(bar): bar.queue_free()
+	)
+
+	# Ligne décorative
+	var line = ColorRect.new()
+	line.size = Vector2(vp.x, 2)
+	line.color = color
+	line.position = Vector2(0, 240)
+	line.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	line.z_index = 26
+	_combat_panel.add_child(line)
+	var line_tw = create_tween().set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_CUBIC)
+	line_tw.tween_property(line, "modulate:a", 1.0, 0.2)
+	line_tw.tween_interval(0.5)
+	line_tw.tween_property(line, "modulate:a", 0.0, 0.2)
+	line_tw.tween_callback(func():
+		if is_instance_valid(line): line.queue_free()
+	)
+
 	var banner = Label.new()
 	banner.text = text
-	banner.add_theme_font_size_override("font_size", 28)
+	banner.add_theme_font_size_override("font_size", 24)
 	banner.add_theme_color_override("font_color", color)
-	banner.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.50))
+	banner.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.70))
+	banner.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.40))
+	banner.add_theme_constant_override("outline_size", 2)
 	banner.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	banner.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	banner.set_anchors_preset(Control.PRESET_TOP_WIDE)
 	banner.position = Vector2(0, 200)
-	banner.size = Vector2(0, 80)
+	banner.size = Vector2(0, 40)
+	banner.z_index = 27
 	_combat_panel.add_child(banner)
 
 	var tween = create_tween().set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_QUAD)
@@ -1727,40 +1971,92 @@ func _show_heal_number(target_node: Control, amount: int) -> void:
 func _show_critical_text(pos: Vector2) -> void:
 	var crit = Label.new()
 	crit.text = "CRITIQUE!"
-	crit.add_theme_font_size_override("font_size", 18)
+	crit.add_theme_font_size_override("font_size", 26)
 	crit.add_theme_color_override("font_color", Color(1.0, 0.85, 0.15))
+	crit.add_theme_color_override("font_shadow_color", Color(0.5, 0.2, 0.0, 0.90))
 	crit.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	crit.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	crit.position = pos - _combat_panel.position
-	crit.position.y -= 20
-	crit.custom_minimum_size = Vector2(120, 24)
+	crit.position.y -= 30
+	crit.custom_minimum_size = Vector2(160, 36)
+	crit.scale = Vector2(0.5, 0.5)
 	_combat_panel.add_child(crit)
 
 	var tween = create_tween().set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_BACK)
-	tween.tween_property(crit, "position:y", crit.position.y - 20, 0.5)
+	tween.tween_property(crit, "scale", Vector2(1.2, 1.2), 0.15)
+	tween.tween_property(crit, "scale", Vector2(1.0, 1.0), 0.1)
+	tween.parallel().tween_property(crit, "position:y", crit.position.y - 30, 0.5)
 	tween.parallel().tween_property(crit, "modulate:a", 0.0, 0.6)
 	tween.tween_callback(func(): if is_instance_valid(crit): crit.queue_free())
 
 func _animate_unit_card_hit(card: Control) -> void:
 	if not card:
 		return
+	# Freeze-frame visuel: la carte se décolore brièvement
+	card.material = _get_hit_flash_material()
 	var orig_pos = card.position
 	var shake = create_tween().set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_QUAD)
-	shake.tween_property(card, "position", orig_pos + Vector2(8, 0), 0.05)
-	shake.tween_property(card, "position", orig_pos - Vector2(6, 0), 0.05)
-	shake.tween_property(card, "position", orig_pos + Vector2(4, 0), 0.05)
+	shake.tween_property(card, "position", orig_pos + Vector2(10, 0), 0.04)
+	shake.tween_property(card, "position", orig_pos - Vector2(7, 2), 0.04)
+	shake.tween_property(card, "position", orig_pos + Vector2(5, -1), 0.04)
 	shake.tween_property(card, "position", orig_pos, 0.05)
 
 	var flash = create_tween().set_ease(Tween.EASE_IN).set_trans(Tween.TRANS_QUAD)
-	flash.tween_property(card, "modulate", Color(1.5, 0.5, 0.5), 0.05)
-	flash.tween_property(card, "modulate", Color.WHITE, 0.15)
+	flash.tween_property(card, "modulate", Color(1.4, 0.4, 0.4), 0.04)
+	flash.tween_property(card, "modulate", Color.WHITE, 0.18)
+	flash.tween_callback(func():
+		if card and is_instance_valid(card):
+			card.material = null
+	)
+
+func _get_hit_flash_material() -> ShaderMaterial:
+	# Simple shader de flash lumineux
+	var mat = ShaderMaterial.new()
+	var shader = Shader.new()
+	shader.code = """
+shader_type canvas_item;
+
+void fragment() {
+	vec4 tex = texture(TEXTURE, UV);
+	COLOR = vec4(tex.rgb, tex.a);
+}
+"""
+	mat.shader = shader
+	return mat
 
 func _animate_card_death(card: Control) -> void:
 	if not card:
 		return
+	# Particules d'âme qui s'élèvent
+	var card_center = card.global_position + card.size / 2
+	for i in 6:
+		var soul = ColorRect.new()
+		soul.size = Vector2(randf_range(4, 8), randf_range(4, 8))
+		soul.color = Color(0.7, 0.6, 0.4, 0.70)
+		soul.position = card_center + Vector2(randf_range(-20, 20), randf_range(-10, 10))
+		soul.z_index = 50
+		soul.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_combat_panel.add_child(soul)
+		var stw = create_tween().set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_CUBIC)
+		stw.tween_property(soul, "position", soul.position + Vector2(randf_range(-15, 15), -40 - randf_range(0, 20)), 0.5)
+		stw.parallel().tween_property(soul, "modulate:a", 0.0, 0.5)
+		stw.tween_callback(func(): if is_instance_valid(soul): soul.queue_free())
+
+	# La carte rétrécit et devient sombre
 	var dt = create_tween().set_ease(Tween.EASE_IN).set_trans(Tween.TRANS_QUAD)
-	dt.tween_property(card, "modulate", Color(0.5, 0.0, 0.0), 0.3)
-	dt.parallel().tween_property(card, "scale", Vector2(0.5, 0.5), 0.3)
+	dt.tween_property(card, "modulate", Color(0.3, 0.0, 0.0), 0.3)
+	dt.parallel().tween_property(card, "scale", Vector2(0.4, 0.4), 0.3)
+	dt.parallel().tween_property(card, "rotation", deg_to_rad(randf_range(-5, 5)), 0.3)
+
+	# Flash d'écran rouge sombre
+	var flash = ColorRect.new()
+	flash.set_anchors_preset(Control.PRESET_FULL_RECT)
+	flash.color = Color(0.3, 0.0, 0.0, 0.15)
+	flash.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_combat_panel.add_child(flash)
+	var ftw = create_tween()
+	ftw.tween_property(flash, "modulate:a", 0.0, 0.3)
+	ftw.tween_callback(func(): if is_instance_valid(flash): flash.queue_free())
 
 func _flash_screen(color: Color, duration: float) -> void:
 	var flash = ColorRect.new()

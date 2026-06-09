@@ -557,7 +557,21 @@ func _on_selection_changed(mode, id, tile):
 				gbi_texture.texture = h.sprite
 				gbt_label.text = h.name
 				_fill_top_bar(h.owner, "", "", "")
-				_fill_creature_bar(h.creatures)
+				# Afficher l'armée (stacks) dans la barre de créatures
+				var display_units: Array = []
+				if h.army and h.army.stacks.size() > 0:
+					for stack in h.army.stacks:
+						var unit_name: String = stack.unit_id
+						var u_data = GameData.UNIT_TYPES.get(stack.unit_id, {})
+						if u_data:
+							unit_name = u_data.get("name", stack.unit_id)
+						display_units.append({"name": unit_name, "amount": stack.count})
+				elif h.creatures.size() > 0:
+					for c in h.creatures:
+						display_units.append(c)
+				else:
+					display_units = h.creatures
+				_fill_creature_bar(display_units)
 				selection_panel.visible = true
 				dbi_label.text = "⏳ %d/%d" % [GameData.turn_counter, GameData.max_turns]
 				dbt_button.text = "Terminer le tour"
